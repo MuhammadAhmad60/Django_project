@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Select Location</title>
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- Bootstrap Bundle JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body class="bg-light">
+
+<div class="container py-5">
+    <h2 class="mb-4">Select and Save Location</h2>
+
+    <form id="location-form" method="post" class="card p-4 shadow-sm bg-white">
+        {% csrf_token %}
+        <input type="hidden" id="editing-id" value="">
+
+        <div class="mb-3">
+            <label for="country-dropdown" class="form-label">Country</label>
+            <select id="country-dropdown" name="country" class="form-select" required>
+                <option value="">Select Country</option>
+                {% for country in countries %}
+                    <option value="{{ country.id }}">{{ country.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label for="province-dropdown" class="form-label">Province</label>
+            <select id="province-dropdown" name="province" class="form-select" required>
+                <option value="">Select Province</option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label for="city-dropdown" class="form-label">City</label>
+            <select id="city-dropdown" name="city" class="form-select" required>
+                <option value="">Select City</option>
+            </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save Location</button>
+    </form>
+
+    <div id="message" class="mt-3"></div>
+
+    {% if saved_locations %}
+    <h3 class="mt-5">Saved Locations</h3>
+    <table class="table table-bordered mt-3 bg-white shadow-sm">
+        <thead class="table-light">
+            <tr>
+                <th>Country</th>
+                <th>Province</th>
+                <th>City</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for loc in saved_locations %}
+            <tr data-id="{{ loc.id }}">
+                <td class="country">{{ loc.country.name }}</td>
+                <td class="province">{{ loc.province.name }}</td>
+                <td class="city">{{ loc.city.name }}</td>
+                <td>
+                    <button class="btn btn-sm btn-warning edit-btn">Edit</button>
+                    <button class="btn btn-sm btn-danger delete-btn">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+<!-- AJAX Script -->
+<script>
+$(document).ready(function () {
+    // Load provinces
+    $('#country-dropdown').on('change', function () {
+        const countryId = $(this).val();
+        $('#province-dropdown').html('<option value="">Loading...</option>');
+        $('#city-dropdown').html('<option value="">Select City</option>');
+        if (countryId) {
+            $.get('/get_provinces/', { country_id: countryId }, function (data) {
+                let options = '<option value="">Select Province</option>';
+                data.provinces.forEach(p => {
+                    options += `<option value="${p.id}">${p.name}</option>`;
+                });
+                $('#province-dropdown').html(options);
+            });
+        }
+    });
+
+    // Load cities
+    $('#province-dropdown').on('change', function () {
+        const provinceId = $(this).val();
+        $('#city-dropdown').html('<option value="">Loading...</option>');
+        if (provinceId) {
+            $.get('/get_cities/', { province_id: provinceId }, function (data) {
+                let options = '<option value="">Select City</option>';
+                data.cities.forEach(c => {
+                    options += `<option value="${c.id}">${c.name}</option>`;
+                });
+                $('#city-dropdown').html(options);
+            });
+        }
+    });
+
+    // Save or Edit location
+    $('#location-form').submit(function (e) {
+        e.preventDefault();
+        const editingId = $('#editing-id').val();
+        const url = editingId ? `/locations/edit/${editingId}/` : '{% url "save_location" %}';
+        $.ajax({
+            type: 'POST',
+            url: url,
+            data: $(this).serialize(),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            success: function (response) {
+                if (response.success) {
+                    $('#message').html(`<div class="alert alert-${editingId ? 'info' : 'success'}">
+                        Location ${editingId ? 'updated' : 'saved'} successfully!
+                    </div>`);
+                    $('#location-form')[0].reset();
+                    $('#editing-id').val('');
+                    setTimeout(() => location.reload(), 800);
+                } else {
+                    $('#message').html('<div class="alert alert-danger">Failed to save/update location.</div>');
+                }
+            }
+        });
+    });
+
+    // Delete location
+    $(document).on('click', '.delete-btn', function () {
+        const id = $(this).closest('tr').data('id');
+        if (confirm('Are you sure you want to delete this location?')) {
+            $.ajax({
+                url: `/locations/delete/${id}/`,
+                type: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                success: function () {
+                    $(`tr[data-id="${id}"]`).remove();
+                    $('#message').html('<div class="alert alert-info">Location deleted.</div>');
+                }
+            });
+        }
+    });
+
+    // Edit location
+    $(document).on('click', '.edit-btn', function () {
+        const row = $(this).closest('tr');
+        const id = row.data('id');
+        const country = row.find('.country').text().trim();
+        const province = row.find('.province').text().trim();
+        const city = row.find('.city').text().trim();
+
+        $('#editing-id').val(id);
+
+        // Set country
+        $('#country-dropdown option').filter(function () {
+            return $(this).text().trim() === country;
+        }).prop('selected', true).trigger('change');
+
+        // Delay province & city select to wait for dynamic load
+        setTimeout(() => {
+            $('#province-dropdown option').filter(function () {
+                return $(this).text().trim() === province;
+            }).prop('selected', true).trigger('change');
+
+            setTimeout(() => {
+                $('#city-dropdown option').filter(function () {
+                    return $(this).text().trim() === city;
+                }).prop('selected', true);
+            }, 500);
+        }, 500);
+    });
+});
+</script>
+
+</body>
+</html>
